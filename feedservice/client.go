@@ -11,8 +11,11 @@ import (
 	"time"
 
 	"github.com/amyangfei/grpc-test/pb"
+	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 )
+
+var receivedEvents = atomic.NewUint64(0)
 
 func newClient(addr string) *grpc.ClientConn {
 	conn, err := grpc.Dial(addr, grpc.WithInsecure())
@@ -27,6 +30,7 @@ func RunClient(
 	statusPort int,
 	clientNum int,
 	workerNum int,
+	reportIval int,
 	requestNum int,
 ) {
 	go func() {
@@ -34,21 +38,47 @@ func RunClient(
 	}()
 
 	log.Printf(
-		"server addr: %s, status port: %d, client num: %d, worker num: %d, requests per worker: %d",
+		"server addr: %s, status port: %d, client num: %d, worker num: %d, "+
+			"report interval: %ds, requests per worker: %d,",
 		serverAddr,
 		statusPort,
 		clientNum,
 		workerNum,
+		reportIval,
 		requestNum,
 	)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	startTime := time.Now()
+	go reporter(ctx, reportIval)
 	handleMultiClient(ctx, serverAddr, clientNum, workerNum, requestNum)
+	cancel()
 	duration := time.Now().Sub(startTime)
 
-	qps := float64(requestNum*workerNum) / (float64(duration.Nanoseconds()) / 1e9)
-	log.Printf("duration: %s, qps is %.0f", duration, qps)
+	received := receivedEvents.Load()
+	qps := float64(received) / (float64(duration.Nanoseconds()) / 1e9)
+	log.Printf("total events: %d, duration: %s, qps is %.0f", received, duration, qps)
+}
+
+func reporter(ctx context.Context, reportIval int) {
+	ticker := time.NewTicker(time.Second * time.Duration(reportIval))
+	defer ticker.Stop()
+	lastReportTime := time.Now()
+	lastReceived := uint64(0)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			duration := now.Sub(lastReportTime)
+			received := receivedEvents.Load()
+			qps := float64(received-lastReceived) / (float64(duration.Nanoseconds()) / 1e9)
+			log.Printf("duration: %s, qps is %.0f", duration, qps)
+			lastReceived = received
+			lastReportTime = now
+		}
+	}
 }
 
 func handleMultiClient(
@@ -79,19 +109,17 @@ func handleMultiClient(
 			if err != nil {
 				log.Panicf("create stream client failed: %s", err)
 			}
-			receivedEvents := 0
 		recvLoop:
 			for {
 				ev, err := stream.Recv()
 				if err != nil {
 					if err == io.EOF {
-						log.Printf("stream %d end, received events: %d",
-							index, receivedEvents)
+						log.Printf("stream %d end", index)
 						break recvLoop
 					}
 					log.Panicf("stream recv with error: %s", err)
 				}
-				receivedEvents += len(ev.GetEvents())
+				receivedEvents.Add(uint64(len(ev.GetEvents())))
 			}
 			wg.Done()
 		}(index)

@@ -12,6 +12,7 @@ var (
 	statusPort = flag.Int("status", 28000, "status port")
 	clientNum  = flag.Int("c", 10, "grpc-client connnect num")
 	workerNum  = flag.Int("g", 10, "goroutine nums")
+	reportIval = flag.Int("i", 10, "report interval in seconds")
 	requestNum = flag.Int("n", 5000000, "requests number of per worker")
 )
 
@@ -22,6 +23,7 @@ func main() {
 		*statusPort,
 		*clientNum,
 		*workerNum,
+		*reportIval,
 		*requestNum,
 	)
 }
