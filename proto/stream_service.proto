@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package pb;
+
+message Event {
+    uint64 ts = 1;
+    string payload = 2;
+}
+
+message FeedEvent {
+    repeated Event events = 1;
+}
+
+message FeedRequest {
+    uint64 start = 1;
+}
+
+service StreamService {
+    rpc Feed(FeedRequest) returns(stream FeedEvent);
+}
