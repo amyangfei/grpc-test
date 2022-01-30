@@ -5,6 +5,7 @@ build:
 	go build -o bin/client client/main.go
 	go build -o bin/feed_server cmd/feed_server_main.go
 	go build -o bin/feed_client cmd/feed_client_main.go
+	go build -o bin/elastic_mysql_client cmd/elastic_mysql_main.go
 
 protoc-gen-gogofaster:
 	go build -o bin/$@ github.com/gogo/protobuf/protoc-gen-gogofaster
