@@ -19,9 +19,10 @@ type DML struct {
 
 type workerQueue struct {
 	sync.Mutex
-	queue   deque.Deque
-	pending atomic.Uint32
-	errCh   chan error
+	queue    deque.Deque
+	pending  atomic.Uint32
+	executed atomic.Uint64
+	errCh    chan error
 }
 
 type Executor struct {
@@ -84,11 +85,15 @@ func NewExecutor(
 	}, nil
 }
 
-func (e *Executor) AddJob(dml *DML, index int) {
+func (e *Executor) checkIndex(index int) {
 	if index < 0 || index >= e.workerSize {
 		log.Panicf("invalid queue index: %d, should be [0, %d]",
 			index, e.workerSize-1)
 	}
+}
+
+func (e *Executor) AddJob(dml *DML, index int) {
+	e.checkIndex(index)
 	q := e.queues[index]
 	q.Lock()
 	q.queue.Enqueue(dml)
@@ -135,6 +140,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 				if err != nil {
 					q.sendError(err)
 				}
+				q.executed.Add(uint64(len(dmls)))
 			}()
 		}
 	}
@@ -149,4 +155,9 @@ func (e *Executor) Run(ctx context.Context) error {
 		})
 	}
 	return wg.Wait()
+}
+
+func (e *Executor) Executed(index int) uint64 {
+	e.checkIndex(index)
+	return e.queues[index].executed.Load()
 }
