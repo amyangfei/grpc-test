@@ -3,7 +3,7 @@ package mysqlop
 import "fmt"
 
 const (
-	TableSchema = "create table `%s`.`%s` " +
+	CreateTableTpl = "create table `%s`.`%s` " +
 		"(id bigint primary key, a1 varchar(50), a2 varchar(50), a3 varchar(50));"
 	varcharSize = 50
 )
@@ -33,9 +33,9 @@ func (g *TableGen) Next() *DML {
 		sql: g.insertSQL,
 		args: []interface{}{
 			g.startID,
-			RandStringBytesMaskImprSrc(varcharSize),
-			RandStringBytesMaskImprSrc(varcharSize),
-			RandStringBytesMaskImprSrc(varcharSize),
+			RandStringBytesRmndr(varcharSize),
+			RandStringBytesRmndr(varcharSize),
+			RandStringBytesRmndr(varcharSize),
 		},
 	}
 	g.startID++

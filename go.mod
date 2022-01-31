@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/edwingeng/deque v0.0.0-20210510083854-82d15ba89fe0
+	github.com/go-sql-driver/mysql v1.6.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/soheilhy/cmux v0.1.5
 	go.uber.org/atomic v1.9.0

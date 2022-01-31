@@ -14,13 +14,13 @@ import (
 )
 
 var (
-	dsn        = flag.String("dsn", "mysql://root@127.0.0.1:3306/", "mysql dsn")
+	dsn        = flag.String("dsn", "root@tcp(127.0.0.1:3306)/test", "mysql dsn")
 	schema     = flag.String("schema", "elastic", "benchmark schema name")
 	tableFmt   = flag.String("table", "test-%d", "table name format")
 	batchSize  = flag.Int("batch", 20, "sql batch size")
 	workerSize = flag.Int("worker", 20, "worker size")
 	maxPending = flag.Int("pending", 20, "max pending background db executor")
-	reportIval = flag.Int("interval", 10, "report interval in seconds")
+	reportI    = flag.Int("interval", 10, "report interval in seconds")
 	dataSize   = flag.Int("data", 500000, "per table data size")
 )
 
@@ -71,6 +71,16 @@ func main() {
 		log.Panicf("create executor failed: %s", err)
 	}
 
+	ddls := make([]string, 0, *workerSize)
+	for i := 0; i < *workerSize; i++ {
+		table := fmt.Sprintf(*tableFmt, i)
+		ddls = append(ddls, fmt.Sprintf(mysqlop.CreateTableTpl, *schema, table))
+	}
+	err = exec.ExecuteDDLs(ctx, ddls)
+	if err != nil {
+		log.Panicf("execute ddls with error: %s", err)
+	}
+
 	errg, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < *workerSize; i++ {
 		i := i
@@ -82,8 +92,12 @@ func main() {
 		return exec.Run(ctx)
 	})
 	errg.Go(func() error {
-		return reporter(ctx, exec, *reportIval)
+		return reporter(ctx, exec, *reportI)
 	})
 	err = errg.Wait()
-	log.Printf("executor run error: %s", err)
+	if err == ErrAllDataExecuted {
+		log.Printf("all data executed successfully")
+	} else {
+		log.Printf("executor run error: %s", err)
+	}
 }

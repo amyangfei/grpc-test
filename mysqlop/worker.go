@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/edwingeng/deque"
+	_ "github.com/go-sql-driver/mysql"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 )
@@ -98,6 +99,16 @@ func (e *Executor) AddJob(dml *DML, index int) {
 	q.Lock()
 	q.queue.Enqueue(dml)
 	q.Unlock()
+}
+
+func (e *Executor) ExecuteDDLs(ctx context.Context, ddls []string) error {
+	for _, ddl := range ddls {
+		_, err := e.db.ExecContext(ctx, ddl)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Executor) singleWorker(ctx context.Context, index int) error {
