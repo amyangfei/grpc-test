@@ -19,7 +19,7 @@ var (
 	tableFmt   = flag.String("table", "test-%d", "table name format")
 	batchSize  = flag.Int("batch", 20, "sql batch size")
 	workerSize = flag.Int("worker", 20, "worker size")
-	maxPending = flag.Int("pending", 20, "max pending background db executor")
+	maxPending = flag.Int("pending", 80, "max pending background db executor")
 	reportI    = flag.Int("interval", 10, "report interval in seconds")
 	dataSize   = flag.Int("data", 500000, "per table data size")
 )
@@ -39,11 +39,14 @@ func reporter(ctx context.Context, exec *mysqlop.Executor, reportIval int) error
 			now := time.Now()
 			duration := now.Sub(lastReportTime)
 			executed := uint64(0)
+			pendingWorkers := uint32(0)
 			for i := 0; i < *workerSize; i++ {
 				executed += exec.Executed(i)
+				pendingWorkers += exec.Pending(i)
 			}
 			qps := float64(executed-lastExecuted) / (float64(duration.Nanoseconds()) / 1e9)
-			log.Printf("duration: %s, qps is %.0f", duration, qps)
+			log.Printf("duration: %s, qps is %.0f, pending workers: %d",
+				duration, qps, pendingWorkers)
 			lastExecuted = executed
 			lastReportTime = now
 			if executed == uint64(*dataSize**workerSize) {

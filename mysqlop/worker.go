@@ -112,7 +112,7 @@ func (e *Executor) ExecuteDDLs(ctx context.Context, ddls []string) error {
 }
 
 func (e *Executor) singleWorker(ctx context.Context, index int) error {
-	ticker := time.NewTicker(time.Millisecond * 20)
+	ticker := time.NewTicker(time.Millisecond * 100)
 	defer ticker.Stop()
 	q := e.queues[index]
 	for {
@@ -171,4 +171,9 @@ func (e *Executor) Run(ctx context.Context) error {
 func (e *Executor) Executed(index int) uint64 {
 	e.checkIndex(index)
 	return e.queues[index].executed.Load()
+}
+
+func (e *Executor) Pending(index int) uint32 {
+	e.checkIndex(index)
+	return e.queues[index].pending.Load()
 }
