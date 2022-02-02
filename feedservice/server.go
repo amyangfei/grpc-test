@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/amyangfei/grpc-test/pb"
+	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 )
@@ -73,8 +75,11 @@ func RunServer(port int) {
 	grpcSrv := grpc.NewServer(
 		grpc.MaxConcurrentStreams(4096),
 		grpc.WriteBufferSize(1024*1024),
+		grpc.UnaryInterceptor(grpc_prometheus.UnaryServerInterceptor),
+		grpc.StreamInterceptor(grpc_prometheus.StreamServerInterceptor),
 	)
 	pb.RegisterStreamServiceServer(grpcSrv, &server{})
+	grpc_prometheus.Register(grpcSrv)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -97,6 +102,7 @@ func RunServer(port int) {
 		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		mux.Handle("/metrics", promhttp.Handler())
 
 		srv := &http.Server{
 			Handler: mux,
