@@ -119,6 +119,8 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-q.errCh:
+			return err
 		case <-ticker.C:
 			if q.pending.Load() == uint32(e.maxPending) {
 				continue
@@ -135,6 +137,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 				tx, err := e.db.BeginTx(ctx, nil)
 				if err != nil {
 					q.sendError(err)
+					return
 				}
 				for _, elem := range dmls {
 					dml := elem.(*DML)
@@ -145,11 +148,13 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 							log.Printf("rollback error: %s", rbErr)
 						}
 						q.sendError(err)
+						return
 					}
 				}
 				err = tx.Commit()
 				if err != nil {
 					q.sendError(err)
+					return
 				}
 				q.executed.Add(uint64(len(dmls)))
 			}()
