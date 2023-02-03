@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/tidb/parser/ast"
 	"github.com/pingcap/tidb/parser/model"
 	"github.com/pingcap/tidb/parser/mysql"
+	_ "github.com/pingcap/tidb/planner/core" // to setup expression.EvalAstExpr
 	"github.com/pingcap/tidb/types"
 	"github.com/pingcap/tidb/util/mock"
 )
@@ -121,7 +122,11 @@ func (g *SysbenchGen) initCache(ctx context.Context) error {
 	return rows.Close()
 }
 
-func getDefaultParser(sqlMode string) (*parser.Parser, error) {
+func getDefaultParser(ctx context.Context, db *sql.DB, sqlMode string) (*parser.Parser, error) {
+	setSQLMode := fmt.Sprintf("SET SESSION SQL_MODE = '%s'", mysql.DefaultSQLMode)
+	if _, err := db.ExecContext(ctx, setSQLMode); err != nil {
+		return nil, err
+	}
 	mode, err := mysql.GetSQLMode(sqlMode)
 	if err != nil {
 		return nil, err
@@ -137,7 +142,7 @@ func (gen *SysbenchGen) getTableInfo(ctx context.Context, schemaTable string) (*
 		return nil, err
 	}
 
-	stmtParser, err := getDefaultParser(mysql.DefaultSQLMode)
+	stmtParser, err := getDefaultParser(ctx, gen.db, mysql.DefaultSQLMode)
 	if err != nil {
 		return nil, err
 	}

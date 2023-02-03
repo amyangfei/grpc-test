@@ -45,7 +45,7 @@ type Executor struct {
 	batchSize   int
 	workerSize  int
 	maxPending  int
-	multiUpdate bool
+	batchUpdate bool
 }
 
 func (q *workerQueue) sendError(err error) {
@@ -78,14 +78,14 @@ func openDB(
 }
 
 type NewExecutorOpt struct {
-	multiUpdate bool
+	batchUpdate bool
 }
 
 type NewExecutorOption func(*NewExecutorOpt)
 
-func WithMultiUpdate() NewExecutorOption {
+func WithBatchUpdate() NewExecutorOption {
 	return func(opt *NewExecutorOpt) {
-		opt.multiUpdate = true
+		opt.batchUpdate = true
 	}
 }
 
@@ -114,7 +114,7 @@ func NewExecutor(
 		batchSize:   batchSize,
 		workerSize:  workerSize,
 		maxPending:  maxPending,
-		multiUpdate: options.multiUpdate,
+		batchUpdate: options.batchUpdate,
 	}, nil
 }
 
@@ -152,16 +152,31 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 	defer ticker.Stop()
 	q := e.queues[index]
 
-	singleUpdate := func(dmls []interface{}) {
+	nonBatchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
+		sqls := make([]string, 0, len(dmls))
+		args := make([][]interface{}, 0, len(dmls))
+		for _, elem := range dmls {
+			dml := elem.(DMLIface)
+			sqls = append(sqls, dml.Stmt())
+			args = append(args, dml.Args())
+		}
+		return sqls, args
+	}
+
+	batchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
+		// TODO
+		return nil, nil
+	}
+
+	exec := func(sqls []string, args [][]interface{}) {
 		defer q.pending.Dec()
 		tx, err := e.db.BeginTx(ctx, nil)
 		if err != nil {
 			q.sendError(err)
 			return
 		}
-		for _, elem := range dmls {
-			dml := elem.(DMLIface)
-			_, err := tx.ExecContext(ctx, dml.Stmt(), dml.Args()...)
+		for i := range sqls {
+			_, err := tx.ExecContext(ctx, sqls[i], args[i]...)
 			if err != nil {
 				rbErr := tx.Rollback()
 				if rbErr != nil {
@@ -176,11 +191,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 			q.sendError(err)
 			return
 		}
-		q.executed.Add(uint64(len(dmls)))
-	}
-
-	multiUpdate := func(dmls []interface{}) {
-		// TODO:
+		q.executed.Add(uint64(len(sqls)))
 	}
 
 	for {
@@ -201,11 +212,16 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 			}
 			q.pending.Inc()
 			go func() {
-				if e.multiUpdate {
-					multiUpdate(dmls)
+				var (
+					sqls []string
+					args [][]interface{}
+				)
+				if e.batchUpdate {
+					sqls, args = batchUpdate(dmls)
 				} else {
-					singleUpdate(dmls)
+					sqls, args = nonBatchUpdate(dmls)
 				}
+				exec(sqls, args)
 			}()
 		}
 	}

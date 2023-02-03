@@ -73,14 +73,14 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 	exec, err := mysqlop.NewExecutor(ctx, *dsn, *batchSize, *workerSize,
-		*maxPending, mysqlop.WithMultiUpdate())
+		*maxPending, mysqlop.WithBatchUpdate())
 	if err != nil {
 		log.Panicf("create executor failed: %s", err)
 	}
 
 	errg, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < *workerSize; i++ {
-		i := i
+		i := i + 1
 		errg.Go(func() error {
 			return generator(ctx, exec, i)
 		})
