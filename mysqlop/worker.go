@@ -13,9 +13,22 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type DMLIface interface {
+	Stmt() string
+	Args() []interface{}
+}
+
 type DML struct {
 	sql  string
 	args []interface{}
+}
+
+func (dml *DML) Stmt() string {
+	return dml.sql
+}
+
+func (dml *DML) Args() []interface{} {
+	return dml.args
 }
 
 type workerQueue struct {
@@ -27,11 +40,12 @@ type workerQueue struct {
 }
 
 type Executor struct {
-	db         *sql.DB
-	queues     []*workerQueue
-	batchSize  int
-	workerSize int
-	maxPending int
+	db          *sql.DB
+	queues      []*workerQueue
+	batchSize   int
+	workerSize  int
+	maxPending  int
+	multiUpdate bool
 }
 
 func (q *workerQueue) sendError(err error) {
@@ -63,9 +77,26 @@ func openDB(
 	return db, err
 }
 
+type NewExecutorOpt struct {
+	multiUpdate bool
+}
+
+type NewExecutorOption func(*NewExecutorOpt)
+
+func WithMultiUpdate() NewExecutorOption {
+	return func(opt *NewExecutorOpt) {
+		opt.multiUpdate = true
+	}
+}
+
 func NewExecutor(
-	ctx context.Context, dsn string, batchSize int, workerSize int, maxPending int,
+	ctx context.Context, dsn string,
+	batchSize int, workerSize int, maxPending int, opts ...NewExecutorOption,
 ) (*Executor, error) {
+	options := &NewExecutorOpt{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	db, err := openDB(ctx, dsn, workerSize, maxPending)
 	if err != nil {
 		return nil, err
@@ -78,11 +109,12 @@ func NewExecutor(
 		})
 	}
 	return &Executor{
-		db:         db,
-		queues:     queues,
-		batchSize:  batchSize,
-		workerSize: workerSize,
-		maxPending: maxPending,
+		db:          db,
+		queues:      queues,
+		batchSize:   batchSize,
+		workerSize:  workerSize,
+		maxPending:  maxPending,
+		multiUpdate: options.multiUpdate,
 	}, nil
 }
 
@@ -93,7 +125,11 @@ func (e *Executor) checkIndex(index int) {
 	}
 }
 
-func (e *Executor) AddJob(dml *DML, index int) {
+func (e *Executor) DB() *sql.DB {
+	return e.db
+}
+
+func (e *Executor) AddJob(dml DMLIface, index int) {
 	e.checkIndex(index)
 	q := e.queues[index]
 	q.Lock()
@@ -115,6 +151,38 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 	ticker := time.NewTicker(time.Millisecond * 100)
 	defer ticker.Stop()
 	q := e.queues[index]
+
+	singleUpdate := func(dmls []interface{}) {
+		defer q.pending.Dec()
+		tx, err := e.db.BeginTx(ctx, nil)
+		if err != nil {
+			q.sendError(err)
+			return
+		}
+		for _, elem := range dmls {
+			dml := elem.(DMLIface)
+			_, err := tx.ExecContext(ctx, dml.Stmt(), dml.Args()...)
+			if err != nil {
+				rbErr := tx.Rollback()
+				if rbErr != nil {
+					log.Printf("rollback error: %s", rbErr)
+				}
+				q.sendError(err)
+				return
+			}
+		}
+		err = tx.Commit()
+		if err != nil {
+			q.sendError(err)
+			return
+		}
+		q.executed.Add(uint64(len(dmls)))
+	}
+
+	multiUpdate := func(dmls []interface{}) {
+		// TODO:
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -133,30 +201,11 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 			}
 			q.pending.Inc()
 			go func() {
-				defer q.pending.Dec()
-				tx, err := e.db.BeginTx(ctx, nil)
-				if err != nil {
-					q.sendError(err)
-					return
+				if e.multiUpdate {
+					multiUpdate(dmls)
+				} else {
+					singleUpdate(dmls)
 				}
-				for _, elem := range dmls {
-					dml := elem.(*DML)
-					_, err := tx.ExecContext(ctx, dml.sql, dml.args...)
-					if err != nil {
-						rbErr := tx.Rollback()
-						if rbErr != nil {
-							log.Printf("rollback error: %s", rbErr)
-						}
-						q.sendError(err)
-						return
-					}
-				}
-				err = tx.Commit()
-				if err != nil {
-					q.sendError(err)
-					return
-				}
-				q.executed.Add(uint64(len(dmls)))
 			}()
 		}
 	}
