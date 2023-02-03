@@ -21,7 +21,8 @@ var (
 	workerSize = flag.Int("worker", 20, "worker size")
 	maxPending = flag.Int("pending", 80, "max pending background db executor")
 	reportI    = flag.Int("interval", 10, "report interval in seconds")
-	dataSize   = flag.Int("data", 100000, "per table data size")
+	dataSize   = flag.Int("data", 100000, "per table update row count")
+	cacheSize  = flag.Int("cache", 10000, "per table cached data size")
 )
 
 var ErrAllDataExecuted = errors.New("all data has been executed")
@@ -57,8 +58,8 @@ func reporter(ctx context.Context, exec *mysqlop.Executor, reportIval int) error
 }
 
 func generator(ctx context.Context, exec *mysqlop.Executor, index int) error {
-	table := fmt.Sprintf(*tableFmt, index)
-	gen, err := mysqlop.NewSysbenchGen(ctx, exec.DB(), *schema, table, *dataSize)
+	table := fmt.Sprintf(*tableFmt, index+1)
+	gen, err := mysqlop.NewSysbenchGen(ctx, exec.DB(), *schema, table, *cacheSize)
 	if err != nil {
 		return err
 	}
@@ -80,7 +81,7 @@ func main() {
 
 	errg, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < *workerSize; i++ {
-		i := i + 1
+		i := i
 		errg.Go(func() error {
 			return generator(ctx, exec, i)
 		})

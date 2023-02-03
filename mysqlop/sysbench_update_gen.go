@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+	"strconv"
 
 	"github.com/pingcap/tidb/ddl"
 	"github.com/pingcap/tidb/parser"
@@ -78,15 +80,18 @@ func NewSysbenchGen(
 func (g *SysbenchGen) Next() *RowChange {
 	row := g.cache[g.next]
 	rc := &RowChange{
-		beforeValues: make([]interface{}, 0, len(row.values)),
-		afterValues:  make([]interface{}, 0, len(row.values)),
+		beforeValues: make([]interface{}, len(row.values)),
+		afterValues:  make([]interface{}, len(row.values)),
 		table:        g.info,
 	}
 	for i, value := range row.values {
 		ft := g.info.Columns[i].FieldType
 		notUniqueKey := !mysql.HasPriKeyFlag(ft.GetFlag()) && !mysql.HasUniKeyFlag(ft.GetFlag())
 		if notUniqueKey && ft.EvalType() == types.ETInt {
-			intVal := value.(int)
+			intVal, err := strconv.Atoi(string(value.([]byte)))
+			if err != nil {
+				log.Panic(err)
+			}
 			row.values[i] = intVal + 1
 			rc.beforeValues[i] = intVal
 			rc.afterValues[i] = intVal + 1
@@ -115,8 +120,15 @@ func (g *SysbenchGen) initCache(ctx context.Context) error {
 		if err := rows.Scan(row...); err != nil {
 			return err
 		}
+		values := make([]interface{}, len(g.info.Columns))
+		for i, v := range row {
+			values[i] = *(v.(*interface{}))
+		}
+		g.cache = append(g.cache, &Row{values: values})
 	}
 	if len(g.cache) < g.size {
+		log.Printf("table %s cached size %d is smaller than expected %d",
+			QuoteSchema(g.schema, g.table), len(g.cache), g.size)
 		g.size = len(g.cache)
 	}
 	return rows.Close()
