@@ -160,11 +160,15 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 	}
 
 	batchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
-		// TODO
-		return nonBatchUpdate(dmls)
+		changes := make([]*RowChange, 0, len(dmls))
+		for _, dml := range dmls {
+			changes = append(changes, dml.(*RowChange))
+		}
+		stmt, args := GenBatchUpdateSQL(changes...)
+		return []string{stmt}, [][]interface{}{args}
 	}
 
-	exec := func(sqls []string, args [][]interface{}) {
+	exec := func(sqls []string, args [][]interface{}, rowCount int) {
 		defer q.pending.Dec()
 		tx, err := e.db.BeginTx(ctx, nil)
 		if err != nil {
@@ -187,7 +191,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 			q.sendError(err)
 			return
 		}
-		q.executed.Add(uint64(len(sqls)))
+		q.executed.Add(uint64(rowCount))
 	}
 
 	for {
@@ -217,7 +221,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 				} else {
 					sqls, args = nonBatchUpdate(dmls)
 				}
-				exec(sqls, args)
+				exec(sqls, args, len(dmls))
 			}()
 		}
 	}
