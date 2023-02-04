@@ -14,36 +14,10 @@ import (
 	"github.com/pingcap/tidb/parser/mysql"
 	_ "github.com/pingcap/tidb/planner/core" // to setup expression.EvalAstExpr
 	"github.com/pingcap/tidb/types"
-	"github.com/pingcap/tidb/util/mock"
 )
 
 type Row struct {
 	values []interface{}
-}
-
-type RowChange struct {
-	beforeValues []interface{}
-	afterValues  []interface{}
-	table        *model.TableInfo
-}
-
-func (r *RowChange) Stmt() string {
-	return ""
-}
-
-func (r *RowChange) Args() []interface{} {
-	return nil
-}
-
-func (r *RowChange) getWhereColumnsAndValues() ([]string, []interface{}) {
-	pk := r.table.GetPrimaryKey()
-	names := make([]string, 0, len(pk.Columns))
-	args := make([]interface{}, 0, len(pk.Columns))
-	for _, idxCol := range pk.Columns {
-		names = append(names, r.table.Columns[idxCol.Offset].Name.O)
-		args = append(args, r.beforeValues[idxCol.Offset])
-	}
-	return names, args
 }
 
 type SysbenchGen struct {
@@ -82,16 +56,15 @@ func (g *SysbenchGen) Next() *RowChange {
 	rc := &RowChange{
 		beforeValues: make([]interface{}, len(row.values)),
 		afterValues:  make([]interface{}, len(row.values)),
-		table:        g.info,
+		schema:       g.schema,
+		table:        g.table,
+		info:         g.info,
 	}
 	for i, value := range row.values {
 		ft := g.info.Columns[i].FieldType
 		notUniqueKey := !mysql.HasPriKeyFlag(ft.GetFlag()) && !mysql.HasUniKeyFlag(ft.GetFlag())
 		if notUniqueKey && ft.EvalType() == types.ETInt {
-			intVal, err := strconv.Atoi(string(value.([]byte)))
-			if err != nil {
-				log.Panic(err)
-			}
+			intVal := value.(int)
 			row.values[i] = intVal + 1
 			rc.beforeValues[i] = intVal
 			rc.afterValues[i] = intVal + 1
@@ -123,6 +96,14 @@ func (g *SysbenchGen) initCache(ctx context.Context) error {
 		values := make([]interface{}, len(g.info.Columns))
 		for i, v := range row {
 			values[i] = *(v.(*interface{}))
+			if g.info.Columns[i].FieldType.EvalType() == types.ETInt {
+				intVal, err := strconv.Atoi(string(values[i].([]byte)))
+				if err != nil {
+					log.Panic(err)
+				}
+				values[i] = intVal
+
+			}
 		}
 		g.cache = append(g.cache, &Row{values: values})
 	}
@@ -163,9 +144,7 @@ func (gen *SysbenchGen) getTableInfo(ctx context.Context, schemaTable string) (*
 		return nil, err
 	}
 
-	dbSession := mock.NewContext()
-	dbSession.GetSessionVars().StrictSQLMode = false
-	ti, err := ddl.BuildTableInfoWithStmt(dbSession, stmtNode.(*ast.CreateTableStmt), mysql.DefaultCharset, "", nil)
+	ti, err := ddl.BuildTableInfoFromAST(stmtNode.(*ast.CreateTableStmt))
 	if err != nil {
 		return nil, err
 	}

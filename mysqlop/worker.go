@@ -14,8 +14,7 @@ import (
 )
 
 type DMLIface interface {
-	Stmt() string
-	Args() []interface{}
+	StmtAndArgs() (string, []interface{})
 }
 
 type DML struct {
@@ -23,12 +22,8 @@ type DML struct {
 	args []interface{}
 }
 
-func (dml *DML) Stmt() string {
-	return dml.sql
-}
-
-func (dml *DML) Args() []interface{} {
-	return dml.args
+func (dml *DML) StmtAndArgs() (string, []interface{}) {
+	return dml.sql, dml.args
 }
 
 type workerQueue struct {
@@ -148,24 +143,25 @@ func (e *Executor) ExecuteDDLs(ctx context.Context, ddls []string) error {
 }
 
 func (e *Executor) singleWorker(ctx context.Context, index int) error {
-	ticker := time.NewTicker(time.Millisecond * 100)
+	ticker := time.NewTicker(time.Millisecond * 10)
 	defer ticker.Stop()
 	q := e.queues[index]
 
 	nonBatchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
 		sqls := make([]string, 0, len(dmls))
-		args := make([][]interface{}, 0, len(dmls))
+		argvs := make([][]interface{}, 0, len(dmls))
 		for _, elem := range dmls {
 			dml := elem.(DMLIface)
-			sqls = append(sqls, dml.Stmt())
-			args = append(args, dml.Args())
+			stmt, args := dml.StmtAndArgs()
+			sqls = append(sqls, stmt)
+			argvs = append(argvs, args)
 		}
-		return sqls, args
+		return sqls, argvs
 	}
 
 	batchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
 		// TODO
-		return nil, nil
+		return nonBatchUpdate(dmls)
 	}
 
 	exec := func(sqls []string, args [][]interface{}) {

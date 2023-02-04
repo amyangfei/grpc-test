@@ -14,3 +14,8 @@ func EscapeName(name string) string {
 func QuoteSchema(schema string, table string) string {
 	return fmt.Sprintf("`%s`.`%s`", EscapeName(schema), EscapeName(table))
 }
+
+// QuoteName wraps a name with "`"
+func QuoteName(name string) string {
+	return "`" + EscapeName(name) + "`"
+}
