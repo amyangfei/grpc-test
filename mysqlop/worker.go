@@ -13,6 +13,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type UpdateMode int
+
+const (
+	ModeMultiRowSQL UpdateMode = iota + 1
+	ModeBatchUpdateTxn
+	ModeMultiStatements
+)
+
 type DMLIface interface {
 	StmtAndArgs() (string, []interface{})
 }
@@ -35,12 +43,12 @@ type workerQueue struct {
 }
 
 type Executor struct {
-	db          *sql.DB
-	queues      []*workerQueue
-	batchSize   int
-	workerSize  int
-	maxPending  int
-	batchUpdate bool
+	db         *sql.DB
+	queues     []*workerQueue
+	batchSize  int
+	workerSize int
+	maxPending int
+	mode       UpdateMode
 }
 
 func (q *workerQueue) sendError(err error) {
@@ -73,14 +81,14 @@ func openDB(
 }
 
 type NewExecutorOpt struct {
-	batchUpdate bool
+	mode UpdateMode
 }
 
 type NewExecutorOption func(*NewExecutorOpt)
 
-func WithBatchUpdate() NewExecutorOption {
+func WithUpdateMode(mode UpdateMode) NewExecutorOption {
 	return func(opt *NewExecutorOpt) {
-		opt.batchUpdate = true
+		opt.mode = mode
 	}
 }
 
@@ -104,12 +112,12 @@ func NewExecutor(
 		})
 	}
 	return &Executor{
-		db:          db,
-		queues:      queues,
-		batchSize:   batchSize,
-		workerSize:  workerSize,
-		maxPending:  maxPending,
-		batchUpdate: options.batchUpdate,
+		db:         db,
+		queues:     queues,
+		batchSize:  batchSize,
+		workerSize: workerSize,
+		maxPending: maxPending,
+		mode:       options.mode,
 	}, nil
 }
 
@@ -147,7 +155,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 	defer ticker.Stop()
 	q := e.queues[index]
 
-	nonBatchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
+	genBatchUpdateTxn := func(dmls []interface{}) ([]string, [][]interface{}) {
 		sqls := make([]string, 0, len(dmls))
 		argvs := make([][]interface{}, 0, len(dmls))
 		for _, elem := range dmls {
@@ -159,13 +167,28 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 		return sqls, argvs
 	}
 
-	batchUpdate := func(dmls []interface{}) ([]string, [][]interface{}) {
+	genMultiRowSQL := func(dmls []interface{}) ([]string, [][]interface{}) {
 		changes := make([]*RowChange, 0, len(dmls))
 		for _, dml := range dmls {
 			changes = append(changes, dml.(*RowChange))
 		}
 		stmt, args := GenBatchUpdateSQL(changes...)
 		return []string{stmt}, [][]interface{}{args}
+	}
+
+	genMultiStmtSQL := func(dmls []interface{}) ([]string, [][]interface{}) {
+		sqls := ""
+		argvs := make([]interface{}, 0)
+		for i, elem := range dmls {
+			dml := elem.(DMLIface)
+			stmt, args := dml.StmtAndArgs()
+			sqls += stmt
+			if i != len(dmls)-1 {
+				sqls += ";"
+			}
+			argvs = append(argvs, args...)
+		}
+		return []string{sqls}, [][]interface{}{argvs}
 	}
 
 	exec := func(sqls []string, args [][]interface{}, rowCount int) {
@@ -216,10 +239,15 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 					sqls []string
 					args [][]interface{}
 				)
-				if e.batchUpdate {
-					sqls, args = batchUpdate(dmls)
-				} else {
-					sqls, args = nonBatchUpdate(dmls)
+				switch e.mode {
+				case ModeBatchUpdateTxn:
+					sqls, args = genBatchUpdateTxn(dmls)
+				case ModeMultiRowSQL:
+					sqls, args = genMultiRowSQL(dmls)
+				case ModeMultiStatements:
+					sqls, args = genMultiStmtSQL(dmls)
+				default:
+					log.Panicf("unknown update mode: %d", e.mode)
 				}
 				exec(sqls, args, len(dmls))
 			}()

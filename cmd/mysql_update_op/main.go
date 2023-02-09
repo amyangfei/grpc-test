@@ -14,16 +14,16 @@ import (
 )
 
 var (
-	dsn         = flag.String("dsn", "root@tcp(127.0.0.1:3306)/test", "mysql dsn")
-	schema      = flag.String("schema", "elastic", "benchmark schema name")
-	tableFmt    = flag.String("table", "sbtest%d", "table name format")
-	batchSize   = flag.Int("batch", 20, "sql batch size")
-	workerSize  = flag.Int("worker", 20, "worker size")
-	maxPending  = flag.Int("pending", 80, "max pending background db executor")
-	reportI     = flag.Int("interval", 10, "report interval in seconds")
-	dataSize    = flag.Int("data", 100000, "per table update row count")
-	cacheSize   = flag.Int("cache", 10000, "per table cached data size")
-	batchUpdate = flag.Bool("batch-update", false, "whether enable batch update")
+	dsn        = flag.String("dsn", "root@tcp(127.0.0.1:3306)/test", "mysql dsn")
+	schema     = flag.String("schema", "elastic", "benchmark schema name")
+	tableFmt   = flag.String("table", "sbtest%d", "table name format")
+	batchSize  = flag.Int("batch", 20, "sql batch size")
+	workerSize = flag.Int("worker", 20, "worker size")
+	maxPending = flag.Int("pending", 80, "max pending background db executor")
+	reportI    = flag.Int("interval", 10, "report interval in seconds")
+	dataSize   = flag.Int("data", 100000, "per table update row count")
+	cacheSize  = flag.Int("cache", 10000, "per table cached data size")
+	updateMode = flag.Int("update-mode", int(mysqlop.ModeBatchUpdateTxn), "update mode")
 )
 
 var ErrAllDataExecuted = errors.New("all data has been executed")
@@ -74,12 +74,10 @@ func generator(ctx context.Context, exec *mysqlop.Executor, index int) error {
 func main() {
 	flag.Parse()
 	ctx := context.Background()
-	opts := []mysqlop.NewExecutorOption{}
-	if *batchUpdate {
-		opts = append(opts, mysqlop.WithBatchUpdate())
+	opts := []mysqlop.NewExecutorOption{
+		mysqlop.WithUpdateMode(mysqlop.UpdateMode(*updateMode)),
 	}
-	exec, err := mysqlop.NewExecutor(ctx, *dsn, *batchSize, *workerSize,
-		*maxPending, opts...)
+	exec, err := mysqlop.NewExecutor(ctx, *dsn, *batchSize, *workerSize, *maxPending, opts...)
 	if err != nil {
 		log.Panicf("create executor failed: %s", err)
 	}
