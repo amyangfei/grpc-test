@@ -179,13 +179,10 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 	genMultiStmtSQL := func(dmls []interface{}) ([]string, [][]interface{}) {
 		sqls := ""
 		argvs := make([]interface{}, 0)
-		for i, elem := range dmls {
+		for _, elem := range dmls {
 			dml := elem.(DMLIface)
 			stmt, args := dml.StmtAndArgs()
-			sqls += stmt
-			if i != len(dmls)-1 {
-				sqls += ";"
-			}
+			sqls += stmt + ";"
 			argvs = append(argvs, args...)
 		}
 		return []string{sqls}, [][]interface{}{argvs}
@@ -194,7 +191,7 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 	exec := func(sqls []string, args [][]interface{}, rowCount int) {
 		defer q.pending.Dec()
 		if len(sqls) == 1 {
-			_, err := e.db.ExecContext(ctx, sqls[0], args[0])
+			_, err := e.db.ExecContext(ctx, sqls[0], args[0]...)
 			if err != nil {
 				q.sendError(err)
 				return
