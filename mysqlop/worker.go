@@ -193,26 +193,34 @@ func (e *Executor) singleWorker(ctx context.Context, index int) error {
 
 	exec := func(sqls []string, args [][]interface{}, rowCount int) {
 		defer q.pending.Dec()
-		tx, err := e.db.BeginTx(ctx, nil)
-		if err != nil {
-			q.sendError(err)
-			return
-		}
-		for i := range sqls {
-			_, err := tx.ExecContext(ctx, sqls[i], args[i]...)
+		if len(sqls) == 1 {
+			_, err := e.db.ExecContext(ctx, sqls[0], args[0])
 			if err != nil {
-				rbErr := tx.Rollback()
-				if rbErr != nil {
-					log.Printf("rollback error: %s", rbErr)
-				}
 				q.sendError(err)
 				return
 			}
-		}
-		err = tx.Commit()
-		if err != nil {
-			q.sendError(err)
-			return
+		} else {
+			tx, err := e.db.BeginTx(ctx, nil)
+			if err != nil {
+				q.sendError(err)
+				return
+			}
+			for i := range sqls {
+				_, err := tx.ExecContext(ctx, sqls[i], args[i]...)
+				if err != nil {
+					rbErr := tx.Rollback()
+					if rbErr != nil {
+						log.Printf("rollback error: %s", rbErr)
+					}
+					q.sendError(err)
+					return
+				}
+			}
+			err = tx.Commit()
+			if err != nil {
+				q.sendError(err)
+				return
+			}
 		}
 		q.executed.Add(uint64(rowCount))
 	}
